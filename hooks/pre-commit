@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+if [ -x node_modules/.bin/tsx ]; then
+  node --import tsx src/cli.ts lint template --mode template
+else
+  echo "agentbrain: skip template lint (dependencies not installed)" >&2
+fi
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --no-banner --config .gitleaks.toml
+fi
