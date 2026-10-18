@@ -4,7 +4,7 @@ import { CONFIDENCE, DEFAULT_SEARCH_LIMIT, MAX_NOTE_CHARS, MAX_READ_CHARS, MAX_S
 import { isRealDate, slugify, utcDate } from "./dates.js";
 import { BrainError, isNodeError } from "./errors.js";
 import { parseFrontmatter, renderFrontmatter } from "./frontmatter.js";
-import { assertSafeRelative, resolveInside } from "./paths.js";
+import { assertSafeRelative, isRawPath, resolveInside, toPosix } from "./paths.js";
 import { findSecrets, isTextPath } from "./secrets.js";
 import { walkFiles } from "./walk.js";
 
@@ -66,7 +66,7 @@ async function createFile(full: string, contents: string): Promise<void> {
 
 export async function readNote(root: string, inputPath: string): Promise<string> {
   const rel = assertSafeRelative(inputPath);
-  if (rel.startsWith("meetings/raw/")) {
+  if (isRawPath(rel)) {
     throw new BrainError("Transcripts are not readable through this server.");
   }
   const full = resolveInside(root, rel);
@@ -84,6 +84,9 @@ export async function readNote(root: string, inputPath: string): Promise<string>
   const back = path.relative(realRoot, realFile);
   if (back.startsWith("..") || path.isAbsolute(back)) {
     throw new BrainError("Path must stay inside the brain.");
+  }
+  if (isRawPath(toPosix(back))) {
+    throw new BrainError("Transcripts are not readable through this server.");
   }
   if (info.size > MAX_READ_CHARS) throw new BrainError("File is too large to read through the server.");
   return readFile(full, "utf8");
@@ -167,7 +170,7 @@ export async function proposeEdit(
   } catch {
     throw new BrainError("target must be a relative path inside the brain.");
   }
-  if (!TARGET_PATH.test(target) || target.startsWith("meetings/raw/")) {
+  if (!TARGET_PATH.test(target) || isRawPath(target)) {
     throw new BrainError("target must be a markdown file inside the brain, and not a transcript.");
   }
   const title = input.title.trim();

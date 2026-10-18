@@ -37,11 +37,16 @@ export function resolveInside(root: string, input: string): string {
   return full;
 }
 
+export function isRawPath(relPosix: string): boolean {
+  const folded = relPosix.toLowerCase();
+  return folded === "meetings/raw" || folded.startsWith("meetings/raw/");
+}
+
 export function isNotePath(relPosix: string): boolean {
   if (relPosix === "README.md" || relPosix.endsWith("/README.md")) return false;
   if (relPosix === "AGENTS.md" || relPosix.endsWith("/AGENTS.md")) return false;
   if (relPosix === "CLAUDE.md" || relPosix.endsWith("/CLAUDE.md")) return false;
-  if (relPosix.startsWith("meetings/raw/")) return false;
+  if (isRawPath(relPosix)) return false;
   if (!relPosix.endsWith(".md")) return false;
   return (
     relPosix.startsWith("me/") ||
@@ -58,5 +63,5 @@ export function isIgnoredDir(relPosix: string, name: string): boolean {
   if (name === ".git" || name === "node_modules" || name === "dist" || name === "coverage") {
     return true;
   }
-  return relPosix === "meetings/raw" || relPosix.startsWith("meetings/raw/");
+  return isRawPath(relPosix);
 }

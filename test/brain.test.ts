@@ -11,7 +11,7 @@ import { initBrain } from "../src/init.js";
 import { lintBrain } from "../src/lint.js";
 import { appendNote, listSkills, proposeEdit, readNote, searchNotes } from "../src/notes.js";
 import { findSecrets } from "../src/secrets.js";
-import { packageRoot } from "../src/paths.js";
+import { isIgnoredDir, isNotePath, isRawPath, packageRoot } from "../src/paths.js";
 import { sampleSecret } from "./helpers.js";
 
 const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -89,6 +89,21 @@ describe("brain files", () => {
     ).rejects.toThrow(/possible secret/);
     await expect(readNote(dir, "../package.json")).rejects.toThrow(/inside the brain/);
     await expect(readNote(dir, "meetings/raw/transcript.md")).rejects.toThrow(/Transcripts/);
+  });
+
+  it("blocks transcripts through case variants", async () => {
+    await initBrain(dir);
+    await mkdir(path.join(dir, "meetings/raw"), { recursive: true });
+    await writeFile(path.join(dir, "meetings/raw/hidden.md"), "UniqueTranscriptToken\n");
+    await expect(readNote(dir, "Meetings/Raw/hidden.md")).rejects.toThrow(/Transcripts/);
+    await expect(readNote(dir, "MEETINGS/RAW/hidden.md")).rejects.toThrow(/Transcripts/);
+    await expect(
+      proposeEdit(dir, { target: "Meetings/Raw/hidden.md", title: "Nope", body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/not a transcript/);
+    expect(isRawPath("Meetings/RAW")).toBe(true);
+    expect(isRawPath("meetings/rawish/a.md")).toBe(false);
+    expect(isNotePath("Meetings/Raw/hidden.md")).toBe(false);
+    expect(isIgnoredDir("Meetings/Raw", "Raw")).toBe(true);
   });
 
   it("proposes an edit without changing the target", async () => {
