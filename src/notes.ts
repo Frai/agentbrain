@@ -1,10 +1,10 @@
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { CONFIDENCE, DEFAULT_SEARCH_LIMIT, MAX_NOTE_CHARS, MAX_READ_CHARS, MAX_SEARCH_LIMIT, SOURCE_TOOLS, type Confidence, type SourceTool } from "./constants.js";
+import { CONFIDENCE, DEFAULT_SEARCH_LIMIT, MAX_NOTE_CHARS, MAX_READ_CHARS, MAX_SEARCH_LIMIT, MAX_TITLE_CHARS, MAX_WRITES_PER_DAY, SOURCE_TOOLS, type Confidence, type SourceTool } from "./constants.js";
 import { isRealDate, slugify, utcDate } from "./dates.js";
 import { BrainError, isNodeError } from "./errors.js";
 import { parseFrontmatter, renderFrontmatter } from "./frontmatter.js";
-import { assertSafeRelative, isRawPath, resolveInside, toPosix } from "./paths.js";
+import { assertSafeRelative, isRawPath, isReadablePath, resolveInside, toPosix } from "./paths.js";
 import { findSecrets, isTextPath } from "./secrets.js";
 import { walkFiles } from "./walk.js";
 
@@ -52,8 +52,56 @@ function assertDate(value: string | undefined): string {
   return date;
 }
 
-async function createFile(full: string, contents: string): Promise<void> {
-  await mkdir(path.dirname(full), { recursive: true });
+function isInside(realRoot: string, realTarget: string): boolean {
+  const back = path.relative(realRoot, realTarget);
+  return !back.startsWith("..") && !path.isAbsolute(back);
+}
+
+async function assertParentInside(root: string, dir: string): Promise<void> {
+  const realRoot = await realpath(root);
+  let existing = dir;
+  for (;;) {
+    try {
+      await lstat(existing);
+      break;
+    } catch (error) {
+      if (!(isNodeError(error) && error.code === "ENOENT")) throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) break;
+      existing = parent;
+    }
+  }
+  if (!isInside(realRoot, await realpath(existing))) {
+    throw new BrainError("Path must stay inside the brain.");
+  }
+}
+
+async function assertDailyQuota(dir: string, date: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return;
+    throw error;
+  }
+  if (names.filter((name) => name.startsWith(`${date}-`)).length >= MAX_WRITES_PER_DAY) {
+    throw new BrainError("Too many notes were written for that date.");
+  }
+}
+
+function assertTitle(value: string, label: string): string {
+  const title = value.trim();
+  if (!title) throw new BrainError(`${label} is empty.`);
+  if (title.length > MAX_TITLE_CHARS) throw new BrainError(`${label} is too long.`);
+  return title;
+}
+
+async function createFile(root: string, full: string, contents: string, date: string): Promise<void> {
+  const dir = path.dirname(full);
+  await assertParentInside(root, dir);
+  await assertDailyQuota(dir, date);
+  await mkdir(dir, { recursive: true });
+  await assertParentInside(root, dir);
   try {
     await writeFile(full, contents, { encoding: "utf8", flag: "wx" });
   } catch (error) {
@@ -68,6 +116,9 @@ export async function readNote(root: string, inputPath: string): Promise<string>
   const rel = assertSafeRelative(inputPath);
   if (isRawPath(rel)) {
     throw new BrainError("Transcripts are not readable through this server.");
+  }
+  if (!isReadablePath(rel)) {
+    throw new BrainError("Only markdown notes can be read through this server.");
   }
   const full = resolveInside(root, rel);
   let info;
@@ -87,6 +138,9 @@ export async function readNote(root: string, inputPath: string): Promise<string>
   }
   if (isRawPath(toPosix(back))) {
     throw new BrainError("Transcripts are not readable through this server.");
+  }
+  if (!isReadablePath(toPosix(back))) {
+    throw new BrainError("Only markdown notes can be read through this server.");
   }
   if (info.size > MAX_READ_CHARS) throw new BrainError("File is too large to read through the server.");
   return readFile(full, "utf8");
@@ -139,12 +193,13 @@ export async function appendNote(
   const sourceTool = assertSourceTool(input.sourceTool);
   const confidence = assertConfidence(input.confidence ?? "low");
   const date = assertDate(input.date);
-  const slug = slugify(input.topic);
-  assertBody(input.topic);
+  const topic = assertTitle(input.topic, "The topic");
+  const slug = slugify(topic);
+  assertBody(topic);
   const body = assertBody(input.body);
   const [year, month] = date.split("-");
   const rel = `log/${year}/${month}/${date}-${sourceTool}-${slug}.md`;
-  const heading = body.startsWith("#") ? body : `# ${input.topic.trim()}\n\n${body}`;
+  const heading = body.startsWith("#") ? body : `# ${topic}\n\n${body}`;
   const contents =
     renderFrontmatter([
       ["source_tool", sourceTool],
@@ -153,7 +208,7 @@ export async function appendNote(
     ]) +
     heading +
     "\n";
-  await createFile(resolveInside(root, rel), contents);
+  await createFile(root, resolveInside(root, rel), contents, date);
   return rel;
 }
 
@@ -173,9 +228,9 @@ export async function proposeEdit(
   if (!TARGET_PATH.test(target) || isRawPath(target)) {
     throw new BrainError("target must be a markdown file inside the brain, and not a transcript.");
   }
-  const title = input.title.trim();
+  const title = assertTitle(input.title, "The title");
   const slug = slugify(title);
-  assertBody(`${target}\n${input.body}`);
+  assertBody(`${target}\n${title}\n${input.body}`);
   const rel = `inbox/${date}-${slug}.md`;
   const contents =
     renderFrontmatter([
@@ -184,6 +239,6 @@ export async function proposeEdit(
       ["confidence", confidence],
       ["target", target],
     ]) + `# ${title}\n\n${input.body.trim()}\n`;
-  await createFile(resolveInside(root, rel), contents);
+  await createFile(root, resolveInside(root, rel), contents, date);
   return rel;
 }

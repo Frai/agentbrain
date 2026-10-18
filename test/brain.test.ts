@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { CONFIDENCE, SOURCE_TOOLS } from "../src/constants.js";
+import { CONFIDENCE, MAX_WRITES_PER_DAY, SOURCE_TOOLS } from "../src/constants.js";
 import { initBrain } from "../src/init.js";
 import { lintBrain } from "../src/lint.js";
 import { appendNote, listSkills, proposeEdit, readNote, searchNotes } from "../src/notes.js";
@@ -43,6 +43,11 @@ describe("secrets", () => {
     expect(findSecrets(sampleSecret("aws")).map((hit) => hit.rule)).toContain("aws-access-key");
     expect(findSecrets(sampleSecret("key")).map((hit) => hit.rule)).toContain("private-key");
     expect(findSecrets(sampleSecret("password")).map((hit) => hit.rule)).toContain("assigned-secret");
+    expect(findSecrets(sampleSecret("unquoted")).map((hit) => hit.rule)).toContain("assigned-secret");
+    expect(findSecrets(sampleSecret("bearer")).map((hit) => hit.rule)).toContain("bearer-token");
+    expect(findSecrets(sampleSecret("url")).map((hit) => hit.rule)).toContain("url-credentials");
+    expect(findSecrets(sampleSecret("stripe")).map((hit) => hit.rule)).toContain("stripe-key");
+    expect(findSecrets("Use a Bearer token in the header, and set the password later.")).toEqual([]);
   });
 });
 
@@ -153,6 +158,60 @@ describe("brain files", () => {
     );
     const findings = await lintBrain(dir, "brain");
     expect(findings.some((finding) => finding.message.includes("aws-access-key"))).toBe(true);
+  });
+
+  it("only reads markdown notes", async () => {
+    await initBrain(dir);
+    await mkdir(path.join(dir, ".git"), { recursive: true });
+    await writeFile(path.join(dir, ".git/config"), "[remote]\n");
+    await writeFile(path.join(dir, ".env"), "KEY=value\n");
+    await writeFile(path.join(dir, "package.json"), "{}\n");
+    await writeFile(path.join(dir, "me/notes.txt"), "text\n");
+    for (const file of [".git/config", ".env", "package.json", "me/notes.txt", ".cursor/../.env"]) {
+      await expect(readNote(dir, file)).rejects.toThrow(/Only markdown notes|inside the brain/);
+    }
+    expect(await readNote(dir, "me/profile.md")).toContain("source_tool");
+  });
+
+  it("scans proposal titles and caps title length", async () => {
+    await initBrain(dir);
+    await expect(
+      proposeEdit(dir, { target: "me/profile.md", title: sampleSecret("github"), body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/possible secret/);
+    await expect(
+      proposeEdit(dir, { target: "me/profile.md", title: "a".repeat(81), body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/too long/);
+    await expect(
+      appendNote(dir, { topic: "a".repeat(81), body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/too long/);
+  });
+
+  it("refuses to write through a symlinked directory", async () => {
+    await initBrain(dir);
+    const outside = await mkdtemp(path.join(tmpdir(), "agentbrain-outside-"));
+    await rm(path.join(dir, "inbox"), { recursive: true, force: true });
+    await symlink(outside, path.join(dir, "inbox"));
+    await expect(
+      proposeEdit(dir, { target: "me/profile.md", title: "Escape", body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/inside the brain/);
+    await rm(path.join(dir, "log"), { recursive: true, force: true });
+    await symlink(outside, path.join(dir, "log"));
+    await expect(
+      appendNote(dir, { topic: "Escape", body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/inside the brain/);
+    expect(await readdir(outside)).toEqual([]);
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("caps writes per day", async () => {
+    await initBrain(dir);
+    for (let index = 0; index < MAX_WRITES_PER_DAY; index += 1) {
+      await appendNote(dir, { topic: `Note ${index}`, body: "x", sourceTool: "cursor", date: "2026-10-15" });
+    }
+    await expect(
+      appendNote(dir, { topic: "One more", body: "x", sourceTool: "cursor", date: "2026-10-15" }),
+    ).rejects.toThrow(/Too many notes/);
+    await appendNote(dir, { topic: "Next day", body: "x", sourceTool: "cursor", date: "2026-10-16" });
   });
 
   it("refuses to read a symlink", async () => {

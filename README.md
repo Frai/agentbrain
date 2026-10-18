@@ -81,7 +81,7 @@ supersedes: path/to/older-note.md
 | `lint [dir]` | Check frontmatter and likely secrets. `--mode template` requires `example: true` |
 | `mcp` | Serve `search`, `read`, `append_note`, `propose_edit`, and `list_skills` over stdio |
 
-`lint` defaults to `--mode brain`, which rejects leftover `example: true` files. Search is a literal case-insensitive match. It does not read `meetings/raw/`.
+`lint` defaults to `--mode brain`, which rejects leftover `example: true` files. Search is a literal case-insensitive match. It does not read `meetings/raw/`. `read` only returns `.md` and `.mdc` files outside dot-directories, and never `meetings/raw/`. Writes refuse symlinked directories, scan titles and bodies for secrets, and stop at 50 notes per day and directory.
 
 ## Shape
 

@@ -13,3 +13,7 @@ export const MAX_READ_CHARS = 256 * 1024;
 export const DEFAULT_SEARCH_LIMIT = 20;
 
 export const MAX_SEARCH_LIMIT = 50;
+
+export const MAX_TITLE_CHARS = 80;
+
+export const MAX_WRITES_PER_DAY = 50;
