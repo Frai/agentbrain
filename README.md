@@ -9,8 +9,8 @@ Personal knowledge stays in a separate private git repo. This repository holds t
 Requires Node 20 or newer.
 
 ```sh
-npm install
-npm run build
+pnpm install
+pnpm build
 node dist/cli.js init ../my-brain
 ```
 
