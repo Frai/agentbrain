@@ -42,6 +42,15 @@ export function isRawPath(relPosix: string): boolean {
   return folded === "meetings/raw" || folded.startsWith("meetings/raw/");
 }
 
+const READABLE_EXTENSIONS = [".md", ".mdc"];
+
+export function isReadablePath(relPosix: string): boolean {
+  if (isRawPath(relPosix)) return false;
+  const folded = relPosix.toLowerCase();
+  if (!READABLE_EXTENSIONS.some((ext) => folded.endsWith(ext))) return false;
+  return !folded.split("/").some((part) => part.startsWith(".") || part === "node_modules" || part === "dist" || part === "coverage");
+}
+
 export function isNotePath(relPosix: string): boolean {
   if (relPosix === "README.md" || relPosix.endsWith("/README.md")) return false;
   if (relPosix === "AGENTS.md" || relPosix.endsWith("/AGENTS.md")) return false;
